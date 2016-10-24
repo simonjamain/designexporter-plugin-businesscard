@@ -1,0 +1,125 @@
+#!/usr/bin/env ruby
+# encoding: utf-8
+
+require 'nokogiri'
+require 'csv'
+require 'yaml'
+require 'fileutils'
+require 'shellwords'
+require 'byebug'
+
+ACCEPTED_FONTS_EXTENSIONS = %w( .ttf .otf )
+ACCEPTED_CONFIGFILE_EXTENSIONS = %w( .yml )
+SOURCES_EXTENSION = 'svg'
+
+
+def isValidFontFile?(fontFile)
+  ACCEPTED_FONTS_EXTENSIONS.include? File.extname(fontFile).downcase
+end
+
+def isValidConfigFile?(configFile)
+  ACCEPTED_CONFIGFILE_EXTENSIONS.include? File.extname(configFile).downcase
+end
+
+def isAnterior?(oldFile, newFile)
+  File.mtime(oldFile) < File.mtime(newFile)
+end
+# récupérer les arguments
+indentitiesFile = ARGV[0].to_s
+sourcesFolder = ARGV[1].to_s
+fontsFolder = ARGV[2].to_s
+outFolder = ARGV[3].to_s
+
+# localiser tout les fichiers yml
+cardsToCompute = []
+Dir.foreach(sourcesFolder) do |node|
+  node = File.join sourcesFolder, node
+  if File.file?(node) && isValidConfigFile?(node)
+    configuration = YAML.load File.read(node)
+    sourceFileName = "#{node.chomp( File.extname(node) )}.#{SOURCES_EXTENSION}"
+    unless configuration['businessCardLayersSetups'].nil? || !File.readable?(sourceFileName)
+      cardsToCompute << {:sourceFileName => sourceFileName, :layersSetups => configuration['businessCardLayersSetups']}
+    end
+  end
+end
+
+# envoyer la sauce
+
+#detects needed fonts
+fontsToInstall = []
+Dir.foreach(fontsFolder) do |node|
+  if File.file?(node) && isValidFontFile?(node)
+    system("cp -n #{node} ~/.fonts/#{node}")
+    puts "#{node} installed"
+  end
+end
+system("fc-cache -fv")
+
+cardsToCompute.each do |cardToCompute|
+
+  svgSource = Nokogiri::XML(File.open(cardToCompute[:sourceFileName]))
+
+  #load configuration files
+  identities = CSV.read(indentitiesFile, headers:true)
+
+# 2 COMPUTING
+  #compute each identities
+  identities.each do |identity|
+  	svgToEdit = svgSource.clone
+
+    puts "IDENTITY: #{identity['identityName']}"
+
+    #change all provided (in csv) and needed fields (in svg)
+    identity.each do |fieldName, fieldContent|
+      #don't process the field containing the identity name
+      unless fieldName == 'identityName' then
+          svgToEdit.xpath('//svg:text[@inkscape:label="' + fieldName + '"]').each do |textTag|
+            puts "'#{fieldName}' content: #{textTag.xpath('./svg:tspan')[0].content} , class: #{textTag.xpath('//svg:tspan')[0].content.class}"
+            textTag.xpath('./svg:tspan')[0].content = fieldContent
+            puts "#{svgToEdit.xpath('//svg:text[@inkscape:label="' + fieldName + '"]/svg:tspan')[0].content}\n\n"
+          end
+      end
+    end
+
+    #export a version for each layer setup
+    cardToCompute[:layersSetups].each do |layerSetName, layerSet|
+
+      exportFolderName = File.join outFolder, identity['identityName']
+      exportFileName = "#{identity['identityName']}_#{layerSetName}"
+      exportFullpath = "#{exportFolderName}/#{exportFileName}"
+
+      # check if export is needed
+      begin
+        next if isAnterior? cardToCompute[:sourceFileName], "#{exportFullpath}.pdf"
+      rescue
+      end
+
+      svgLayerSetToEdit = svgToEdit.clone
+
+      svgAllLayers = svgLayerSetToEdit.xpath('//svg:g[@inkscape:groupmode="layer"]')
+
+      svgAllLayers.each do |svgLayer|
+        svgCurrentLayerName = svgLayer.attributes['label'].value
+
+        if layerSet.include? svgCurrentLayerName
+          svgLayer.attributes['style'].value = 'display:inline' #force layer display
+        else
+          svgLayer.remove # not so sure
+        end
+      end
+
+      #now that only desired layers has been kept, produce the "filtered" svg file
+      FileUtils.mkpath(exportFolderName)
+
+      #save modified svg
+      File.write("#{exportFullpath}.svg", svgLayerSetToEdit.to_xml)
+
+      #convert svg to pdf
+      print "#{exportFullpath}.pdf produced.\n" if system "inkscape -C --export-pdf=#{exportFullpath.shellescape}.pdf --export-text-to-path --export-dpi=300 --without-gui #{exportFullpath.shellescape}.svg"
+
+      #remove modified svg
+      File.delete("#{exportFullpath}.svg")
+
+    end
+  end
+end
