@@ -57,7 +57,7 @@ system("fc-cache -fv")
 
 cardsToCompute.each do |cardToCompute|
 
-  svgSource = Nokogiri::XML(File.open(cardToCompute[:sourceFileName]))
+  svgSource = Nokogiri::XML(File.read(cardToCompute[:sourceFileName]))
 
   #load configuration files
   identities = CSV.read(indentitiesFile, headers:true)
