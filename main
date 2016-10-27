@@ -6,7 +6,6 @@ require 'csv'
 require 'yaml'
 require 'fileutils'
 require 'shellwords'
-require 'byebug'
 
 ACCEPTED_FONTS_EXTENSIONS = %w( .ttf .otf )
 ACCEPTED_CONFIGFILE_EXTENSIONS = %w( .yml )
@@ -27,8 +26,7 @@ end
 # récupérer les arguments
 indentitiesFile = ARGV[0].to_s
 sourcesFolder = ARGV[1].to_s
-fontsFolder = ARGV[2].to_s
-outFolder = ARGV[3].to_s
+outFolder = ARGV[2].to_s
 
 # localiser tout les fichiers yml
 cardsToCompute = []
@@ -44,16 +42,6 @@ Dir.foreach(sourcesFolder) do |node|
 end
 
 # envoyer la sauce
-
-#detects needed fonts
-fontsToInstall = []
-Dir.foreach(fontsFolder) do |node|
-  if File.file?(node) && isValidFontFile?(node)
-    system("cp -n #{node} ~/.fonts/#{node}")
-    puts "#{node} installed"
-  end
-end
-system("fc-cache -fv")
 
 cardsToCompute.each do |cardToCompute|
 
